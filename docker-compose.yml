@@ -1,0 +1,13 @@
+services:
+  redis:
+    image: redis:7.2.5-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - './docker/redis-data:/root/redis'
+      - './docker/redis.conf:/usr/local/etc/redis/redis.conf'
+    environment:
+      - REDIS_PASSWORD=top-secret
+      - REDIS_PORT=6379
+      - REDIS_DATABASES=16
