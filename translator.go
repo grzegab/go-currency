@@ -2,29 +2,52 @@ package main
 
 import (
 	"errors"
+	"log"
 	"math"
 	"strconv"
 	"strings"
 )
 
-func Translate(a float64) string {
-	var sb strings.Builder
+type lang int
 
-	value, _ := math.Modf(a)
-	friction := int(a*100) % 100
+const (
+	PL lang = iota
+	EN
+)
 
-	mainText, _ := countMain(int(value))
-	decimalText, _ := countDecimal(friction)
-
-	sb.WriteString(mainText)
-
-	sb.WriteString("i")
-	sb.WriteString(decimalText)
-
-	return sb.String()
+type Translator struct {
+	Input    float64
+	Language lang
+	output   strings.Builder
 }
 
-func countDecimal(d int) (string, error) {
+// Translate will turn float number into currency text value
+func (t *Translator) Translate(a float64) string {
+	i, _ := math.Modf(a)
+	fraction := int(math.Round(a*100) - (i * 100))
+
+	intToText, err := translateInt(int(i))
+	if err != nil {
+		log.Fatalf("Error occured: %s", err.Error())
+	}
+	if len(intToText) > 0 {
+		t.output.WriteString(intToText)
+	}
+
+	decimalText, err := translateFraction(fraction)
+	if err != nil {
+		log.Fatalf("Error occured: %s", err.Error())
+	}
+
+	if len(decimalText) > 0 {
+		t.output.WriteString("i")
+		t.output.WriteString(decimalText)
+	}
+
+	return t.output.String()
+}
+
+func translateFraction(d int) (string, error) {
 	var sb strings.Builder
 
 	text, err := numberToText(d)
@@ -34,45 +57,52 @@ func countDecimal(d int) (string, error) {
 
 	sb.WriteString(text)
 
-	last := lastLetterFromText(text)
+	l := lastLetterFromText(text)
 
+	sb.WriteString(" ")
 	sb.WriteString("grosz")
 
 	if d == 1 {
 		return sb.String(), nil
 	}
 
-	if last == 'a' || last == 'y' {
+	if l == 'a' || l == 'y' {
 		sb.WriteString("e")
-		return sb.String(), nil
+	} else {
+		sb.WriteString("y")
 	}
-
-	sb.WriteString("y")
 
 	return sb.String(), nil
 }
 
-func countMain(num int) (string, error) {
+func translateInt(num int) (string, error) {
 	var sb strings.Builder
+	var p []int
 
-	strNum := strconv.Itoa(num)
-	revNum := reverseString(strNum)
-	parts := []int{}
+	st := strconv.Itoa(num)
+	rt := reverseString(st)
 
-	for i := 0; i < len(revNum); i += 3 {
+	// Divide number into group of 3 e.g. 123456: 123 & 456
+	for i := 0; i < len(rt); i += 3 {
 		end := i + 3
-		if end > len(revNum) {
-			end = len(revNum)
+		if end > len(rt) {
+			end = len(rt)
 		}
-		partStr := reverseString(revNum[i:end])
+		partStr := reverseString(rt[i:end])
 		partNum, _ := strconv.Atoi(partStr)
-		parts = append(parts, partNum)
+		p = append(p, partNum)
 	}
 
-	for j := len(parts) - 1; j >= 0; j-- {
-		text, _ := numberToText(parts[j])
-		sb.WriteString(text)
-		sb.WriteString(" ")
+	for j := len(p) - 1; j >= 0; j-- {
+		text, err := numberToText(p[j])
+		if err != nil {
+			return "", err
+		}
+
+		if !(len(sb.String()) > 1 && strings.Trim(text, " ") == "zero") {
+			sb.WriteString(strings.Trim(text, " "))
+			sb.WriteString(" ")
+		}
 
 		if j > 0 {
 			sb.WriteString(multiThousand(j, text))
@@ -82,9 +112,9 @@ func countMain(num int) (string, error) {
 		if j == 0 {
 			ll := lastLetterFromText(text)
 
-			if parts[j] == 1 {
+			if p[j] == 1 {
 				sb.WriteString("złoty")
-			} else if ll == 'a' {
+			} else if ll == 'a' || ll == 'y' {
 				sb.WriteString("złote")
 			} else {
 				sb.WriteString("złotych")
@@ -94,7 +124,9 @@ func countMain(num int) (string, error) {
 		}
 	}
 
-	return sb.String(), nil
+	t := sb.String()
+
+	return t, nil
 }
 
 func lastLetterFromText(t string) rune {
@@ -153,7 +185,7 @@ func numberToText(n int) (string, error) {
 	}
 
 	firstDigit := n / 100
-	if n > 100 && n < 500 {
+	if n >= 100 && n < 500 {
 		switch firstDigit {
 		case 1:
 			sb.WriteString("sto")
@@ -171,6 +203,10 @@ func numberToText(n int) (string, error) {
 
 	sb.WriteString(" ")
 
+	if n == 0 {
+		sb.WriteString("zero")
+	}
+
 	lastTwoDigits := n % 100
 	if lastTwoDigits > 0 && lastTwoDigits <= 10 {
 		sb.WriteString(smallest(lastTwoDigits))
@@ -186,14 +222,15 @@ func numberToText(n int) (string, error) {
 	} else {
 		secondLastDigit := lastTwoDigits / 10 % 10
 
-		sb.WriteString(smallest(secondLastDigit))
+		sb.WriteString(firstForDouble(secondLastDigit))
+
 		if secondLastDigit == 2 {
 			sb.WriteString("dzieścia")
 			sb.WriteString(" ")
 		} else if secondLastDigit >= 3 && secondLastDigit <= 4 {
 			sb.WriteString("dzieści")
 			sb.WriteString(" ")
-		} else if secondLastDigit > 5 {
+		} else if secondLastDigit >= 5 {
 			sb.WriteString("dziesiąt")
 			sb.WriteString(" ")
 		}
@@ -205,6 +242,31 @@ func numberToText(n int) (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+func firstForDouble(num int) string {
+	var sb strings.Builder
+
+	switch num {
+	case 2:
+		sb.WriteString("dwa")
+	case 3:
+		sb.WriteString("trzy")
+	case 4:
+		sb.WriteString("czter")
+	case 5:
+		sb.WriteString("pięć")
+	case 6:
+		sb.WriteString("sześć")
+	case 7:
+		sb.WriteString("siedem")
+	case 8:
+		sb.WriteString("osiem")
+	case 9:
+		sb.WriteString("dziewięć")
+	}
+
+	return sb.String()
 }
 
 func smallest(num int) string {
